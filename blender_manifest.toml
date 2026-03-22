@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+
+id = "action_sync"
+name = "Action Sync"
+tagline = "Automatically syncs the active action from an Armature to all linked Mesh objects"
+version = "1.0.0"
+type = "add-on"
+
+maintainer = "Junglegreen Studios <jakob@junglegreenstudios.com>"
+license = ["SPDX:GPL-2.0-or-later"]
+
+blender_version_min = "4.4.0"
+
+[permissions]
+# No special permissions needed
