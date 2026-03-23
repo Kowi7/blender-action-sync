@@ -32,6 +32,7 @@ class ActionSyncGroup(PropertyGroup):
     targets: CollectionProperty(type=ActionSyncTarget)
     active_target_index: IntProperty(default=0)
     expanded: BoolProperty(default=True)
+    pending_target: StringProperty(name="", default="")
 
 
 class ActionSyncSettings(PropertyGroup):
@@ -72,10 +73,12 @@ class ACTIONSYNC_OT_remove_group(Operator):
         settings = context.scene.action_sync
         idx = self.group_index
         if 0 <= idx < len(settings.groups):
+            group = settings.groups[idx]
+            cache_key = f"{group.name}_{group.armature_name}"
+            if cache_key in _last_actions:
+                del _last_actions[cache_key]
             settings.groups.remove(idx)
             settings.active_group_index = max(0, idx - 1)
-            if idx in _last_actions:
-                del _last_actions[idx]
         return {'FINISHED'}
 
 
@@ -125,6 +128,34 @@ class ACTIONSYNC_OT_pick_target(Operator):
                 self.report({'WARNING'}, f"{obj.name} is already in this group")
         else:
             self.report({'WARNING'}, "Please select a Mesh object first")
+        return {'FINISHED'}
+
+
+class ACTIONSYNC_OT_confirm_pending_target(Operator):
+    bl_idname = "action_sync.confirm_pending_target"
+    bl_label = "Add from Search"
+    bl_description = "Add the searched object as a sync target"
+
+    group_index: IntProperty()
+
+    def execute(self, context):
+        group = context.scene.action_sync.groups[self.group_index]
+        obj_name = group.pending_target.strip()
+        if not obj_name:
+            self.report({'WARNING'}, "No object selected")
+            return {'CANCELLED'}
+        obj = bpy.data.objects.get(obj_name)
+        if not obj:
+            self.report({'WARNING'}, f"Object not found: {obj_name}")
+            return {'CANCELLED'}
+        existing = [t.obj_name for t in group.targets]
+        if obj_name in existing:
+            self.report({'WARNING'}, f"{obj_name} is already in this group")
+            return {'CANCELLED'}
+        new_target = group.targets.add()
+        new_target.obj_name = obj_name
+        group.pending_target = ""
+        self.report({'INFO'}, f"Added: {obj_name}")
         return {'FINISHED'}
 
 
@@ -225,7 +256,15 @@ class ACTIONSYNC_PT_panel(Panel):
             # ── Targets ──
             tgt_box = col.box()
             tgt_box.label(text="Target Objects", icon='MESH_DATA')
-            pick_tgt = tgt_box.operator("action_sync.pick_target", text="Add Selected", icon='ADD')
+
+            # Search field row
+            search_row = tgt_box.row(align=True)
+            search_row.prop_search(group, "pending_target", bpy.data, "objects", text="", icon='VIEWZOOM')
+            confirm = search_row.operator("action_sync.confirm_pending_target", text="", icon='ADD')
+            confirm.group_index = g_idx
+
+            # Add Selected button
+            pick_tgt = tgt_box.operator("action_sync.pick_target", text="Add Selected", icon='RESTRICT_SELECT_OFF')
             pick_tgt.group_index = g_idx
 
             for t_idx, target in enumerate(group.targets):
@@ -246,10 +285,12 @@ def sync_group(group, g_idx, force=False):
         return False
 
     current_action = armature.animation_data.action
-    if not force and current_action == _last_actions.get(g_idx):
+    # Use group name + armature as stable key, not index
+    cache_key = f"{group.name}_{group.armature_name}"
+    if not force and current_action == _last_actions.get(cache_key):
         return False
 
-    _last_actions[g_idx] = current_action
+    _last_actions[cache_key] = current_action
     action_name = current_action.name if current_action else "None"
     print(f"[ActionSync] Group '{group.name}' → {action_name}")
 
@@ -310,6 +351,7 @@ classes = [
     ACTIONSYNC_OT_remove_group,
     ACTIONSYNC_OT_pick_armature,
     ACTIONSYNC_OT_pick_target,
+    ACTIONSYNC_OT_confirm_pending_target,
     ACTIONSYNC_OT_remove_target,
     ACTIONSYNC_OT_sync_now,
     ACTIONSYNC_PT_panel,
