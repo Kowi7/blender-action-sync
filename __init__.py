@@ -257,16 +257,21 @@ class ACTIONSYNC_PT_panel(Panel):
             tgt_box = col.box()
             tgt_box.label(text="Target Objects", icon='MESH_DATA')
 
-            # Search field row
-            search_row = tgt_box.row(align=True)
-            search_row.prop_search(group, "pending_target", bpy.data, "objects", text="", icon='VIEWZOOM')
-            confirm = search_row.operator("action_sync.confirm_pending_target", text="", icon='ADD')
-            confirm.group_index = g_idx
+            # Add via search at top
+            tgt_box.label(text="Search and press + to add:", icon='VIEWZOOM')
+            add_row = tgt_box.row(align=True)
+            add_row.prop_search(group, "pending_target", bpy.data, "objects", text="")
+            op = add_row.operator("action_sync.confirm_pending_target", text="", icon='ADD')
+            op.group_index = g_idx
 
-            # Add Selected button
-            pick_tgt = tgt_box.operator("action_sync.pick_target", text="Add Selected", icon='RESTRICT_SELECT_OFF')
+            # Add via viewport selection
+            pick_tgt = tgt_box.operator("action_sync.pick_target", text="Add Selected Object", icon='RESTRICT_SELECT_OFF')
             pick_tgt.group_index = g_idx
 
+            tgt_box.separator()
+
+            # Existing targets
+            tgt_box.label(text=f"Synced Objects ({len(group.targets)}):", icon='MESH_DATA')
             for t_idx, target in enumerate(group.targets):
                 t_row = tgt_box.row(align=True)
                 t_row.prop_search(target, "obj_name", bpy.data, "objects", text="")
@@ -324,6 +329,8 @@ def sync_group(group, g_idx, force=False):
 
 
 def do_sync_all(scene, force=False):
+    if not hasattr(scene, 'action_sync'):
+        return 0
     settings = scene.action_sync
     if not settings.enabled:
         return 0
@@ -336,7 +343,24 @@ def do_sync_all(scene, force=False):
 
 
 def sync_handler(scene):
-    do_sync_all(scene)
+    try:
+        do_sync_all(scene)
+    except Exception as e:
+        print(f"[ActionSync] Error in sync_handler: {e}")
+
+def frame_change_handler(scene):
+    try:
+        do_sync_all(scene)
+    except Exception as e:
+        print(f"[ActionSync] Error in frame_change_handler: {e}")
+
+def timer_handler():
+    try:
+        for scene in bpy.data.scenes:
+            do_sync_all(scene)
+    except Exception as e:
+        print(f"[ActionSync] Error in timer_handler: {e}")
+    return 1.0
 
 
 # ─────────────────────────────────────────────
@@ -364,10 +388,18 @@ def register():
     bpy.types.Scene.action_sync = bpy.props.PointerProperty(type=ActionSyncSettings)
     if sync_handler not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(sync_handler)
+    if frame_change_handler not in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.append(frame_change_handler)
+    if not bpy.app.timers.is_registered(timer_handler):
+        bpy.app.timers.register(timer_handler, persistent=True)
     print("[ActionSync] Addon registered")
 
 
 def unregister():
+    if bpy.app.timers.is_registered(timer_handler):
+        bpy.app.timers.unregister(timer_handler)
+    if frame_change_handler in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.remove(frame_change_handler)
     if sync_handler in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(sync_handler)
     del bpy.types.Scene.action_sync
